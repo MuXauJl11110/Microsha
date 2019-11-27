@@ -17,6 +17,9 @@
 #include <time.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <dirent.h>
+#include <regex>
+#include <signal.h>
 
 using namespace std;
 
@@ -24,11 +27,11 @@ class shell {
 private:
     // Парсинг
     string current_directory_name; // Текущее имя директории
+    string current_directory_path; // Текущее путь к директории
     stringstream input_request_stream; // Поток для обработки запроса
     string input_request_string;
 
     // Флаги
-    bool exit_flag = true;
     bool root_flag; // 0 - привелегированный пользователь
 
     // Имя файла для перенаправления вывода
@@ -58,6 +61,7 @@ private:
     void shell_echo(const vector<string>& print) const;
     void shell_set(const vector<string>& request);
     void shell_time(const vector<char *>& request);
+    bool template_search(const string& path_template, vector<vector<string>>& requests);
 public:
     explicit shell (){
         // Получение информации о привилегиях пользователя
@@ -67,6 +71,10 @@ public:
         get_request();
     }
     void get_request();
+
+    string make_template(const string& str);
+    vector<string> make_queue(const string& path, const string& templ);
+    vector<string> make_paths(vector<string>& paths, const string& str);
 };
 
 #endif //INC_1_TASK_SHELL_H

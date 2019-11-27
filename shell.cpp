@@ -3,10 +3,11 @@
 void shell::get_current_directory_name() {
     char cwd[256];
 
-    if (getcwd(cwd, sizeof(cwd)) == nullptr)
+    if (getcwd(cwd, sizeof(cwd)) == nullptr) {
         perror("getcwd() error");
-    else
-        current_directory_name = cwd;
+    } else {
+        current_directory_path = current_directory_name = cwd;
+    }
     if (root_flag) {
         current_directory_name += ">";
     } else {
@@ -15,17 +16,17 @@ void shell::get_current_directory_name() {
 }
 
 void shell::get_request() {
-    while (exit_flag) {
-        cout << current_directory_name;
-        getline(cin, input_request_string, '\n');
+    cout << current_directory_name;
+    while (getline(cin, input_request_string, '\n')) {
         // Очистка потока для дальнейшего использования
         input_request_stream.str("");
         input_request_stream.clear();
         input_request_stream << input_request_string;
         input_analyzer();
+        cout << current_directory_name;
     }
+    cout << endl;
 }
-
 void shell::input_analyzer() {
     string text, word;
     vector<string> words;
@@ -115,7 +116,6 @@ void shell::input_analyzer() {
                         cout << "Wrong format of command 'set'" << endl;
                         return;
                     }
-                    cout << words[i] << endl;
                     conveyor_requests[num_of_conveyor_requests - 1].push_back(words[i]);
                     i++;
                 }
@@ -171,8 +171,22 @@ void shell::input_analyzer() {
                     conveyor_requests.emplace_back(vector<string>());
                     break;
                 case '/':
+                    if (template_search(words[i], conveyor_requests)) {
+                        cout << "Wrong request! Not such file or directory" << endl;
+                        return;
+                    }
+                    break;
+                case '*':
+                    if (template_search(words[i], conveyor_requests)) {
+                        cout << "Wrong request! Not such file or directory" << endl;
+                        return;
+                    }
                     break;
                 case '.':
+                    if (template_search(words[i], conveyor_requests)) {
+                        cout << "Wrong request! Not such file or directory" << endl;
+                        return;
+                    }
                     break;
                 default:
                     conveyor_requests[num_of_conveyor_requests - 1].push_back(words[i]);
@@ -206,7 +220,7 @@ void shell::run_conveyor(vector<vector<string>>& conveyor, int num_of_conveyor_r
         for (int j = 0; j < conveyor[i].size(); j++) {
             conveyor_requests[i].push_back((char *)conveyor[i][j].c_str());
         }
-        conveyor_requests[i].push_back(NULL);
+        conveyor_requests[i].push_back(nullptr);
     }
 
     int tmp_fd[2];
@@ -373,208 +387,148 @@ void shell::shell_time(const vector<char *>& request){
     cout << "The sys/time: " << (double)resource.ru_stime.tv_sec + resource.ru_stime.tv_usec / 1000000.0 << endl;
     cout << "The user/time: " << (double)resource.ru_utime.tv_sec + resource.ru_utime.tv_usec / 1000000.0 << endl;
 }
-/* Свалка возможно нужных модулей */
-/*void shell::make_map(char **env) {
-    int i = 0;
-    while (env[i]) {
-        stringstream input(env[i]);
-        string name, value;
-        getline(input, name, '=');
-        getline(input, value);
-        env_variables[name] = value;
+vector<string> shell::make_queue(const string& path, const string& templ) {
+    const regex regexp(templ);
+    vector<string> file_paths;
+    string new_path;
 
-        // Очистка потока для дальнейшего использования
-        input.str("");
-        input.clear();
-        i++;
+    DIR *dir = opendir(path.c_str());
+    if (dir == nullptr) {
+        return vector<string>();
     }
-}*/
-
-/*
-string text, word;
-stringstream tmp_stream;
-
-while (getline(input_request_stream, text, '|')) {
-    tmp_stream.str("");
-    tmp_stream.clear();
-    tmp_stream << text;
-    tmp_stream >> word;
-    if (!word.empty()) {
-        num_of_conveyor_requests++;
-        conveyor.emplace_back(vector<string>());
-        conveyor[num_of_conveyor_requests - 1].push_back(word);
-        while (tmp_stream >> word) {
-            conveyor[num_of_conveyor_requests - 1].push_back(word);
-        }
-    }
-}
-*/
-/*void shell::input_analyzer() {
-    string previous_word, current_word, text;
-    string VAR;
-    vector<string> request;
-
-    while (input_request_stream >> current_word) {
-        //cout << current_word << " ";
-        if (internal_commands.find(current_word) != internal_commands.end()) { // Слово является внутренней командой
-            switch(internal_commands.find(current_word)->second) {
-                case _CD_COMMAND_ : //cd
-                    // Проверка того, что команда cd единственная в запросе
-                    if (previous_word.empty()) {
-                        shell_cd();
+    for (auto rd = readdir(dir); rd != nullptr; rd = readdir(dir)) {
+        auto m = cmatch{};
+        if (regex_match(rd->d_name, m, regexp)) {
+            switch (rd->d_type) {
+                case DT_REG: // file
+                    //cout << "File:" << rd->d_name << endl;
+                    if (path != "/") {
+                        new_path = path + "/" + rd->d_name;
                     } else {
-                        cout << "Command 'cd' should be single in request." << endl;
+                        new_path = path + rd->d_name;
                     }
-                    return;
-                case _PWD_COMMAND_ : // pwd
-                    shell_pwd();
+                    //cout << new_path;
+                    file_paths.push_back(new_path);
                     break;
-                case _TIME_COMMAND_ : // time
-                    break;
-                case _ECHO_COMMAND_ : // echo
-                    while ((input_request_stream >> current_word) && (current_word != "|")) {
-                        switch (current_word[0]) {
-                            case '$':
-                                // Возможно переменная окружения
-                                if (env_variables.find(current_word) != env_variables.end()) {
-                                    request.push_back(env_variables[current_word]);
-                                } else {
-                                    request.push_back(current_word);
-                                }
-                                break;
-                            // Экранирование метасимволов
-                            case '\\':
-                                if ((current_word.size() == 2)
-                                    && (metacharacter.find(current_word[1]) != metacharacter.end())) {
-                                    request.push_back(current_word.substr(1, 1));
-                                } else {
-                                    request.push_back(current_word);
-                                }
-                                break;
-                            case '"':
-                                getline(input_request_stream, text, '"');
-                                if (text[text.size() - 1] == '\n'){
-                                    cout << "Wrong request in command echo." << endl;
-                                    return;
-                                } else {
-                                    request.push_back(current_word.substr(1, current_word.size() - 1) + text);
-                                }
-                                break;
-                            default:
-                                request.push_back(current_word);
-                                break;
-                        }
-                    }
-                    shell_echo(request);
-                    break;
-                case _SET_COMMAND_ : // set
-                    getline(input_request_stream, VAR, '=');
-                    if (VAR[VAR.size() - 1] == '\n') {
-                        cout << "Wrong request in command set." << endl;
-                        return;
-                    } else {
-                        input_request_stream >> current_word;
-                        if (current_word[0] == '"') {
-                            getline(input_request_stream, text, '"');
-                            if (text[text.size() - 1] == '\n'){
-                                cout << "Wrong request in command set." << endl;
-                                return;
-                            } else {
-                                shell_set(VAR, text);
-                            }
+                case DT_DIR: // directory
+                    //cout << "Directory:" << rd->d_name << endl;
+                    if ((strcmp(rd->d_name, ".") != 0) && (strcmp(rd->d_name, "..") != 0) && (rd->d_name[0] != '.')) {
+                        if (path != "/") {
+                            new_path = path + "/" + rd->d_name;
                         } else {
-
+                            new_path = path + rd->d_name;
                         }
-                        break;
+                        file_paths.push_back(new_path);
                     }
-                default :
                     break;
-            }
-        } else {
-            switch(current_word[0]) {
-                case '"'  : // Допилить
-                    break;
-                case '>':
-                    break;
-                case '<':
-                    break;
-                case '|': // Конвейер
-                    //input.run_conveyor(input_request_string);
-                    return;
                 default :
                     break;
             }
         }
-        previous_word = current_word;
     }
-    cout << endl;
-}*/
-
-/*void shell::input_analyzer() {
-    string text, word;
-    vector<vector<string>> requests;
-    stringstream tmp_stream;
-    int num_of_requests = 0;
-
-    while (getline(input_request_stream, text, '"')) {
-        tmp_stream.str("");
-        tmp_stream.clear();
-        tmp_stream << text;
-        tmp_stream >> word;
-        // Если между кавычками ни встретилось ни одного слова
-        if (word.empty()) {
-            getline(input_request_stream, text, '"');
-            if (num_of_requests < 1) {
-                cout << "Wrong requst! You have forgotten to enter command!" << endl;
-                return;
-            } else {
-                requests[num_of_requests - 1].push_back(text);
-            }
-        } else {
-            num_of_requests++;
-            requests.emplace_back(vector<string>());
-            requests[num_of_requests - 1].push_back(word);
-            while (tmp_stream >> word) {
-                requests[num_of_requests - 1].push_back(word);
-            }
-            getline(input_request_stream, text, '"');
-            requests[num_of_requests - 1].push_back(text);
-        }
-        word.erase();
-        // Если
-        if (input_request_stream.eof()) {
-            cout << "Wrong request! You have forgotten to close a quote!" << endl;
-            return;
-        }
-    }
-    for (int i = 0; i < num_of_requests; i++) {
-        for (int j = 0; j < requests[i].size(); j++) {
-            cout << requests[i][j] << " ";
-        }
-        cout << endl;
-    }
+    closedir(dir);
+    return file_paths;
 }
-void shell::shell_cd() {
-    string path, end_stream;
-    input_request_stream >> path;
-    getline(input_request_stream, end_stream, '\n');
-    if (end_stream.empty()) {
-        int return_value;
-        if (path.empty()) {
-            return_value = chdir((env_variables["HOME"]).c_str());
-            env_variables["PATH"] = env_variables["HOME"];
-        } else {
-            return_value = chdir(path.substr(1, path.size() - 2).c_str());
-            env_variables["PATH"] = path.substr(1, path.size() - 2);
-        }
-        if (return_value == -1) {
-            perror("shell_cd() error");
-            return;
-        }
-        get_current_directory_name();
-    } else {
-        cout << "Command 'cd' should be single in request." << endl;
-    }
-}
+string shell::make_template(const string& str) {
+    string new_str;
 
- */
+    for (int i = 0; i < str.size(); i++){
+        switch (str[i]) {
+            case '*':
+                new_str.push_back('.');
+                new_str.push_back('*');
+                break;
+            case '.':
+                new_str.push_back('\\');
+                new_str.push_back('.');
+                break;
+            case '?':
+                new_str.push_back('.');
+                new_str.push_back('?');
+                break;
+            default:
+                new_str.push_back(str[i]);
+                break;
+        }
+    }
+    return new_str;
+}
+vector<string> shell::make_paths(vector<string>& paths, const string& str) {
+    vector<string> new_paths;
+
+    for (auto & i : paths) {
+        vector<string> tmp = make_queue(i, str);
+        for (auto &j : tmp) {
+            new_paths.push_back(j);
+        }
+    }
+    return new_paths;
+}
+bool shell::template_search(const string& path_template, vector<vector<string>>& requests) {
+    vector<string> file_paths;
+
+    string temp, current_path;
+    bool make_templ = false;
+
+    for (int i = 0; i < path_template.size(); i++){
+        switch (path_template[i]) {
+            case '/': // Обнуление шаблона
+                if (file_paths.empty()) { // Первый в запросе слэш
+                    if (!temp.empty()) { // Если перед ним стоял не пустая часть пути
+                        file_paths.emplace_back(current_directory_path);
+                        if (make_templ) {
+                            file_paths = make_paths(file_paths, make_template(temp));
+                        } else {
+                            file_paths = make_paths(file_paths, temp);
+                        }
+                        temp.clear();
+                    } else {
+                        file_paths.emplace_back("/");
+                    }
+                } else {
+                    if (make_templ) {
+                        file_paths = make_paths(file_paths, make_template(temp));
+                    } else {
+                        for (int j = 0; j < file_paths.size(); j++) {
+                            file_paths[j].push_back('/');
+                            file_paths[j] += temp;
+                        }
+                    }
+                    temp.clear();
+                }
+                make_templ = false;
+                break;
+            case '*':
+                temp.push_back(path_template[i]);
+                make_templ = true;
+                break;
+            case '?':
+                temp.push_back(path_template[i]);
+                make_templ = true;
+                break;
+            default:
+                temp.push_back(path_template[i]);
+                break;
+        }
+    }
+    if (!temp.empty()) {
+        if (make_templ) {
+            if (file_paths.empty()) {
+                file_paths.emplace_back(current_directory_path);
+            }
+            file_paths = make_paths(file_paths, make_template(temp));
+        } else {
+            if (file_paths.empty()) {
+                file_paths.emplace_back(current_directory_path);
+            }
+            file_paths = make_paths(file_paths, temp);
+        }
+    }
+    if (file_paths.empty()) {
+        return true;
+    }
+    for (auto& i : file_paths) {
+        requests[requests.size() - 1].push_back(i);
+    }
+    return false;
+}
